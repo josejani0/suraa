@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Sura Game</title>
+<style>
+body {
+  margin: 0;
+  overflow: hidden;
+  background: #111;
+}
+canvas {
+  display: block;
+  background: #222;
+}
+#scoreUI {
+  position: fixed;
+  top: 15px;
+  left: 20px;
+  color: black;
+  font-family: Arial;
+  font-size: 24px;
+}
+#copyright {
+  position: fixed;
+  bottom: 10px;
+  right: 15px;
+  color: black;
+  font-family: Arial;
+  font-size: 18px;
+  opacity: 0.7;
+}
+
+/* PAUSE MENU */
+#pauseMenu{
+  position:fixed;
+  top:0;
+  left:0;
+  width:100%;
+  height:100%;
+  background:rgba(0,0,0,0.7);
+  display:none;
+  justify-content:center;
+  align-items:center;
+  flex-direction:column;
+  font-family:Arial;
+  color:white;
+}
+
+.pauseBtn{
+  margin:10px;
+  padding:12px 30px;
+  font-size:22px;
+  cursor:pointer;
+  border:none;
+  border-radius:5px;
+}
+</style>
+</head>
+<body>
+
+<div id="scoreUI">
+  Score: <span id="score">0</span><br>
+  High Score: <span id="highScore">0</span>
+</div>
+
+<div id="copyright">
+  © Jose 'n' Joslin
+</div>
+
+<div id="pauseMenu">
+  <h1>Paused</h1>
+  <button class="pauseBtn" id="resumeBtn">Resume</button>
+  <button class="pauseBtn" id="restartBtn">Start New Game</button>
+  <button class="pauseBtn" id="quitBtn">Quit</button>
+</div>
+
+<canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resizeCanvas();
+window.addEventListener("resize", resizeCanvas);
+
+// BACKGROUND IMAGE
+const bgImg = new Image();
+bgImg.src = "background.png";
+
+// PLAYER IMAGE
+const playerImg = new Image();
+playerImg.src = "sura.png";
+
+// ENEMY IMAGES
+const enemyImages = [];
+["enemy1.png","enemy2.png","enemy3.png","enemy4.png"].forEach(src => {
+  const img = new Image();
+  img.src = src;
+  enemyImages.push(img);
+});
+
+// POWERUP IMAGE
+const powerUpImg = new Image();
+powerUpImg.src = "powerup.png";
+
+// PLAYER
+let player = {
+  x: 200,
+  y: 200,
+  size: 80,
+  speed: 10
+};
+
+let enemies = [];
+let keys = {};
+let score = 0;
+let gameOver = false;
+let zoomedEnemy = null;
+let paused = false;
+
+let powerUp = null;
+let powerUpSize = 80;
+
+let blinkTimer = 0;
+let blinkVisible = true;
+
+let shakeTime = 0;
+let shakeIntensity = 10;
+
+let highScore = localStorage.getItem("dodgeHighScore") || 0;
+document.getElementById("highScore").innerText = highScore;
+
+document.addEventListener("keydown", e => {
+  keys[e.key] = true;
+
+  if(e.key === "Escape"){
+    paused = !paused;
+    document.getElementById("pauseMenu").style.display = paused ? "flex":"none";
+  }
+});
+
+document.addEventListener("keyup", e => keys[e.key] = false);
+
+
+// SAFE SPAWN RADIUS
+const spawnSafeRadius = 250;
+
+
+// SPAWN ENEMY (UPDATED)
+function spawnEnemy() {
+  let size = Math.random() * 20 + 30;
+
+  let x, y, dist;
+
+  do{
+    x = Math.random() * canvas.width;
+    y = Math.random() * canvas.height;
+
+    let dx = player.x - x;
+    let dy = player.y - y;
+    dist = Math.sqrt(dx*dx + dy*dy);
+
+  }while(dist < spawnSafeRadius);
+
+  enemies.push({
+    x: x,
+    y: y,
+    size: size,
+    img: enemyImages[Math.floor(Math.random() * enemyImages.length)],
+    speed: 1.5 + score * 0.02,
+    zoomed: false
+  });
+}
+
+setInterval(() => {
+  if (!gameOver && !paused) spawnEnemy();
+}, 1200);
+
+
+// SPAWN POWERUP
+setInterval(()=>{
+  if(!powerUp && !gameOver && !paused){
+    powerUp = {
+      x: Math.random() * (canvas.width - powerUpSize),
+      y: Math.random() * (canvas.height - powerUpSize)
+    };
+  }
+},10000);
+
+
+// INCREASE PLAYER SPEED BY 5% EVERY 5 SECONDS
+setInterval(() => {
+  if(!gameOver && !paused){
+    player.speed *= 1.05;
+  }
+}, 5000);
+
+
+// UPDATE
+function update() {
+
+  if (gameOver || paused) return;
+
+  if (keys["ArrowLeft"]) player.x -= player.speed;
+  if (keys["ArrowRight"]) player.x += player.speed;
+  if (keys["ArrowUp"]) player.y -= player.speed;
+  if (keys["ArrowDown"]) player.y += player.speed;
+
+  player.x = Math.max(0, Math.min(canvas.width - player.size, player.x));
+  player.y = Math.max(0, Math.min(canvas.height - player.size, player.y));
+
+  enemies.forEach(enemy => {
+    if (!enemy.zoomed) {
+      let dx = player.x - enemy.x;
+      let dy = player.y - enemy.y;
+      let dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist > 0) {
+        enemy.x += (dx / dist) * enemy.speed;
+        enemy.y += (dy / dist) * enemy.speed;
+      }
+
+      if (
+        player.x < enemy.x + enemy.size &&
+        player.x + player.size > enemy.x &&
+        player.y < enemy.y + enemy.size &&
+        player.y + player.size > enemy.y
+      ) {
+          gameOver = true;
+
+          enemy.zoomed = true;
+          zoomedEnemy = enemy;
+          enemy.x = 0;
+          enemy.y = 0;
+          enemy.size = Math.max(canvas.width, canvas.height);
+
+          ctx.fillStyle = "red";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          let audio = new Audio("jumpscare.mp3");
+          audio.play();
+
+          shakeTime = 80;
+          shakeIntensity = 25;
+      }
+    }
+  });
+
+  if(powerUp){
+    if(
+      player.x < powerUp.x + powerUpSize &&
+      player.x + player.size > powerUp.x &&
+      player.y < powerUp.y + powerUpSize &&
+      player.y + player.size > powerUp.y
+    ){
+      enemies = enemies.slice(0, Math.floor(enemies.length * 0.75));
+      powerUp = null;
+    }
+  }
+
+  blinkTimer++;
+  if(blinkTimer > 8){
+    blinkVisible = !blinkVisible;
+    blinkTimer = 0;
+  }
+
+  score += 0.1;
+  let currentScore = Math.floor(score);
+  document.getElementById("score").innerText = currentScore;
+
+  if (currentScore > highScore) {
+    highScore = currentScore;
+    localStorage.setItem("dodgeHighScore", highScore);
+    document.getElementById("highScore").innerText = highScore;
+  }
+}
+
+
+// DRAW
+function draw() {
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (bgImg.complete) {
+    ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
+  } else {
+    ctx.fillStyle = "#222";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  if (shakeTime > 0) {
+    let dx = (Math.random() - 0.5) * (shakeIntensity + Math.random() * 10);
+    let dy = (Math.random() - 0.5) * (shakeIntensity + Math.random() * 10);
+    ctx.save();
+    ctx.translate(dx, dy);
+    shakeTime--;
+  }
+
+  if (!gameOver) {
+
+    if (playerImg.complete) {
+      ctx.drawImage(playerImg, player.x, player.y, player.size, player.size);
+    }
+
+    enemies.forEach(enemy => {
+      if (enemy.img.complete) {
+        ctx.drawImage(enemy.img, enemy.x, enemy.y, enemy.size, enemy.size);
+      }
+    });
+
+    if(powerUp && blinkVisible){
+      if(powerUpImg.complete){
+        ctx.drawImage(powerUpImg,powerUp.x,powerUp.y,powerUpSize,powerUpSize);
+      }
+    }
+
+  } else if (zoomedEnemy) {
+
+    if (zoomedEnemy.img.complete) {
+      ctx.drawImage(zoomedEnemy.img, 0, 0, canvas.width, canvas.height);
+    }
+
+    ctx.fillStyle = "white";
+    ctx.font = "50px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("GAME OVER!!!!", canvas.width / 2, canvas.height / 2 - 40);
+    ctx.font = "25px Arial";
+    ctx.fillText("Click to Restart", canvas.width / 2, canvas.height / 2 + 40);
+  }
+
+  if (shakeTime > 0) {
+    ctx.restore();
+  }
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+loop();
+
+document.addEventListener("click", () => {
+  if (gameOver) {
+    enemies = [];
+    score = 0;
+    player.x = 200;
+    player.y = 200;
+    player.speed = 10;  // reset speed on restart
+    gameOver = false;
+    zoomedEnemy = null;
+    shakeTime = 0;
+    shakeIntensity = 15;
+    powerUp = null;
+  }
+});
+
+document.getElementById("resumeBtn").onclick = () =>{
+  paused = false;
+  document.getElementById("pauseMenu").style.display="none";
+};
+
+document.getElementById("restartBtn").onclick = () =>{
+  enemies = [];
+  score = 0;
+  player.x = 200;
+  player.y = 200;
+  player.speed = 10; // reset speed on restart
+  gameOver = false;
+  zoomedEnemy = null;
+  paused = false;
+  powerUp = null;
+  document.getElementById("pauseMenu").style.display="none";
+};
+
+document.getElementById("quitBtn").onclick = () =>{
+  location.reload();
+};
+</script>
+</body>
+</html>
